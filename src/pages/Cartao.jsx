@@ -1,16 +1,22 @@
 import { useState } from 'react'
 import { useFinanceiro } from '../hooks/useFinanceiro'
 import { fmt, fmtPct, CATEGORIAS, corStatus, MESES_NOME } from '../lib/utils'
+import { Plus, Edit2, Trash2 } from 'lucide-react'
 
 export default function Cartao({ mes, ano }) {
-  const { loading, totalCartao, cartaoPorCategoria, orcamentos, salvarOrcamento } = useFinanceiro(mes, ano)
-  const [editando, setEditando] = useState(null)
+  const {
+    loading, lancamentos, cartoes, orcamentos,
+    totalCartao, cartaoPorCategoria, salvarOrcamento,
+    salvarCartao, excluirCartao
+  } = useFinanceiro(mes, ano)
+
+  const [editandoOrc, setEditandoOrc] = useState(null)
   const [novoOrc, setNovoOrc] = useState('')
-  const [limiteCartao, setLimiteCartao] = useState(0)
+  const [modalCartao, setModalCartao] = useState(null) // null | 'novo' | objeto
+  const [formCartao, setFormCartao] = useState({ nome: '', dia_fechamento: 4, dia_vencimento: 11 })
+  const [saving, setSaving] = useState(false)
 
   if (loading) return <div className="loading"><div className="spinner" /> Carregando...</div>
-
-  const pctLimite = limiteCartao > 0 ? totalCartao / limiteCartao : 0
 
   const dicas = {
     '🏠 Moradia': 'Evite parcelar contas fixas no cartão',
@@ -27,9 +33,37 @@ export default function Cartao({ mes, ano }) {
     '🔧 Outros': 'Classifique melhor para não acumular aqui',
   }
 
+  // Total por cartão
+  const totalPorCartao = cartoes.map(c => ({
+    ...c,
+    total: lancamentos.filter(l => l.cartao_id === c.id).reduce((a, l) => a + l.valor, 0)
+  }))
+
   const salvarOrc = async (cat) => {
     await salvarOrcamento(cat, parseFloat(novoOrc) || 0)
-    setEditando(null)
+    setEditandoOrc(null)
+  }
+
+  const abrirNovoCartao = () => {
+    setFormCartao({ nome: '', dia_fechamento: 4, dia_vencimento: 11 })
+    setModalCartao('novo')
+  }
+
+  const abrirEditarCartao = (c) => {
+    setFormCartao({ nome: c.nome, dia_fechamento: c.dia_fechamento, dia_vencimento: c.dia_vencimento })
+    setModalCartao(c)
+  }
+
+  const salvarCartaoForm = async () => {
+    if (!formCartao.nome) return
+    setSaving(true)
+    if (modalCartao === 'novo') {
+      await salvarCartao(formCartao)
+    } else {
+      await salvarCartao({ ...modalCartao, ...formCartao })
+    }
+    setSaving(false)
+    setModalCartao(null)
   }
 
   const totalOrc = CATEGORIAS.reduce((a, cat) => a + (orcamentos.find(o => o.categoria === cat)?.valor || 0), 0)
@@ -39,41 +73,53 @@ export default function Cartao({ mes, ano }) {
     <div>
       <div className="page-header">
         <h2>Cartão de Crédito</h2>
-        <p>{MESES_NOME[mes-1]} {ano}</p>
+        <p>{MESES_NOME[mes - 1]} {ano}</p>
       </div>
 
-      <div className="cards-grid mb-24">
-        <div className="card purple">
-          <div className="card-label">Total da Fatura</div>
-          <div className="card-value">{fmt(totalCartao)}</div>
+      {/* Resumo por cartão */}
+      <div className="mb-24">
+        <div className="flex-between mb-16">
+          <div className="section-title" style={{ margin: 0 }}>Meus Cartões</div>
+          <button className="btn btn-primary btn-sm" onClick={abrirNovoCartao}>
+            <Plus size={14} /> Novo cartão
+          </button>
         </div>
-        <div className="card blue">
-          <div className="card-label">Limite do Cartão</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-            <input
-              type="number"
-              value={limiteCartao || ''}
-              onChange={e => setLimiteCartao(parseFloat(e.target.value) || 0)}
-              placeholder="Informe o limite"
-              style={{ fontSize: '1rem', padding: '6px 10px' }}
-            />
-          </div>
-        </div>
-        <div className={`card ${pctLimite > 0.9 ? 'red' : pctLimite > 0.7 ? 'yellow' : 'green'}`}>
-          <div className="card-label">% do Limite Usado</div>
-          <div className="card-value">{limiteCartao > 0 ? fmtPct(pctLimite) : '—'}</div>
-          {limiteCartao > 0 && (
-            <div className="progress-bar mt-8">
-              <div className="progress-fill" style={{ width: `${Math.min(pctLimite * 100, 100)}%`, background: pctLimite > 0.9 ? 'var(--red)' : pctLimite > 0.7 ? 'var(--yellow)' : 'var(--green)' }} />
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16 }}>
+          {cartoes.map(c => {
+            const totalC = totalPorCartao.find(t => t.id === c.id)?.total || 0
+            return (
+              <div key={c.id} className="card purple" style={{ position: 'relative' }}>
+                <div className="flex-between mb-8">
+                  <div style={{ fontWeight: 700, fontSize: '1rem' }}>💳 {c.nome}</div>
+                  <div className="flex-center" style={{ gap: 4 }}>
+                    <button className="btn btn-ghost btn-icon btn-sm" onClick={() => abrirEditarCartao(c)}>
+                      <Edit2 size={13} />
+                    </button>
+                    <button className="btn btn-danger btn-icon btn-sm" onClick={() => excluirCartao(c.id)}>
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </div>
+                <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.6rem', color: 'var(--accent)' }}>
+                  {fmt(totalC)}
+                </div>
+                <div className="text-muted text-sm mt-4">
+                  Fecha dia {c.dia_fechamento} · Vence dia {c.dia_vencimento}
+                </div>
+              </div>
+            )
+          })}
+
+          {cartoes.length === 0 && (
+            <div className="empty-state">
+              <p>Nenhum cartão cadastrado</p>
             </div>
           )}
         </div>
-        <div className={`card ${totalReal > totalOrc && totalOrc > 0 ? 'red' : 'green'}`}>
-          <div className="card-label">Orçado vs Realizado</div>
-          <div className="card-value">{fmt(totalReal)} / {fmt(totalOrc)}</div>
-        </div>
       </div>
 
+      {/* Tabela por categoria */}
       <div className="table-wrap">
         <div className="table-header">
           <h3>📂 Gastos no Cartão por Categoria</h3>
@@ -83,7 +129,7 @@ export default function Cartao({ mes, ano }) {
           <thead>
             <tr>
               <th>Categoria</th>
-              <th className="text-right">Orçamento Cartão</th>
+              <th className="text-right">Orçamento</th>
               <th className="text-right">Gasto Real</th>
               <th className="text-right">Diferença</th>
               <th>Status</th>
@@ -97,12 +143,11 @@ export default function Cartao({ mes, ano }) {
               if (real === 0 && orc === 0) return null
               const diff = orc - real
               const cor = corStatus(real, orc)
-
               return (
                 <tr key={cat}>
                   <td><strong>{cat}</strong></td>
                   <td className="text-right">
-                    {editando === cat ? (
+                    {editandoOrc === cat ? (
                       <div className="flex-center" style={{ justifyContent: 'flex-end' }}>
                         <input
                           type="number" step="0.01"
@@ -112,12 +157,12 @@ export default function Cartao({ mes, ano }) {
                           autoFocus
                         />
                         <button className="btn btn-primary btn-sm" onClick={() => salvarOrc(cat)}>✓</button>
-                        <button className="btn btn-ghost btn-sm" onClick={() => setEditando(null)}>×</button>
+                        <button className="btn btn-ghost btn-sm" onClick={() => setEditandoOrc(null)}>×</button>
                       </div>
                     ) : (
                       <span
                         style={{ cursor: 'pointer', color: 'var(--yellow)', textDecoration: 'underline dotted' }}
-                        onClick={() => { setEditando(cat); setNovoOrc(orc) }}
+                        onClick={() => { setEditandoOrc(cat); setNovoOrc(orc) }}
                         title="Clique para editar"
                       >
                         {orc > 0 ? fmt(orc) : '+ definir'}
@@ -149,6 +194,53 @@ export default function Cartao({ mes, ano }) {
           </tbody>
         </table>
       </div>
+
+      {/* Modal cartão */}
+      {modalCartao && (
+        <div className="modal-overlay" onClick={() => setModalCartao(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-head">
+              <h3>{modalCartao === 'novo' ? '+ Novo Cartão' : `✏️ Editar ${modalCartao.nome}`}</h3>
+              <button className="btn btn-ghost btn-icon btn-sm" onClick={() => setModalCartao(null)}>×</button>
+            </div>
+            <div className="modal-body">
+              <div className="form-group">
+                <label>Nome do Cartão</label>
+                <input
+                  value={formCartao.nome}
+                  onChange={e => setFormCartao(f => ({ ...f, nome: e.target.value }))}
+                  placeholder="Ex: Nubank, BTG, Inter..."
+                />
+              </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Dia de fechamento</label>
+                  <input
+                    type="number" min="1" max="31"
+                    value={formCartao.dia_fechamento}
+                    onChange={e => setFormCartao(f => ({ ...f, dia_fechamento: parseInt(e.target.value) }))}
+                  />
+                  <div className="text-muted text-sm mt-4">Compras após este dia vão para a próxima fatura</div>
+                </div>
+                <div className="form-group">
+                  <label>Dia de vencimento</label>
+                  <input
+                    type="number" min="1" max="31"
+                    value={formCartao.dia_vencimento}
+                    onChange={e => setFormCartao(f => ({ ...f, dia_vencimento: parseInt(e.target.value) }))}
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="modal-foot">
+              <button className="btn btn-ghost" onClick={() => setModalCartao(null)}>Cancelar</button>
+              <button className="btn btn-primary" onClick={salvarCartaoForm} disabled={saving}>
+                {saving ? 'Salvando...' : 'Salvar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
