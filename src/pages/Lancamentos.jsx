@@ -1,20 +1,19 @@
 import { useState } from 'react'
-import { useFinanceiro } from '../hooks/useFinanceiro'
+import { useFinanceiro, calcularMesCompetencia } from '../hooks/useFinanceiro'
 import { fmt, CATEGORIAS, FORMAS_PAG, TIPOS, MESES_NOME } from '../lib/utils'
-import { Plus, Trash2, Edit2 } from 'lucide-react'
-import { supabase } from '../lib/supabase'
+import { Plus, Trash2, Edit2, CreditCard } from 'lucide-react'
 
 const FORM_VAZIO = {
   data: '', tipo: 'Despesa Fixa', pessoa: '', categoria: CATEGORIAS[0],
-  valor: '', forma_pagamento: 'Débito', descricao: '', observacao: ''
+  valor: '', forma_pagamento: 'Débito', cartao_id: '', descricao: '', observacao: ''
 }
 
 export default function Lancamentos({ mes, ano }) {
   const {
-    loading, lancamentos, config,
+    loading, lancamentos, config, cartoes,
     despesasFixas, despesasVariaveis, investimentos,
     totalDespesas, totalCartao, saldoMes, receitaTotal,
-    adicionarLancamento, excluirLancamento, recarregar
+    adicionarLancamento, editarLancamento, excluirLancamento,
   } = useFinanceiro(mes, ano)
 
   const [modal, setModal] = useState(false)
@@ -41,17 +40,18 @@ export default function Lancamentos({ mes, ano }) {
     setModal(true)
   }
 
-  const abrirEditar = (lancamento) => {
-    setEditando(lancamento)
+  const abrirEditar = (l) => {
+    setEditando(l)
     setForm({
-      data: lancamento.data || '',
-      tipo: lancamento.tipo,
-      pessoa: lancamento.pessoa,
-      categoria: lancamento.categoria,
-      valor: lancamento.valor,
-      forma_pagamento: lancamento.forma_pagamento,
-      descricao: lancamento.descricao || '',
-      observacao: lancamento.observacao || '',
+      data: l.data || '',
+      tipo: l.tipo,
+      pessoa: l.pessoa,
+      categoria: l.categoria,
+      valor: l.valor,
+      forma_pagamento: l.forma_pagamento,
+      cartao_id: l.cartao_id || '',
+      descricao: l.descricao || '',
+      observacao: l.observacao || '',
     })
     setModal(true)
   }
@@ -62,27 +62,32 @@ export default function Lancamentos({ mes, ano }) {
     setForm(FORM_VAZIO)
   }
 
+  // Preview do mês que vai entrar quando for cartão
+  const previewMesCartao = () => {
+    if (!form.cartao_id) return null
+    const cartao = cartoes.find(c => c.id === form.cartao_id)
+    if (!cartao) return null
+    const dataRef = form.data || new Date().toISOString().slice(0, 10)
+    const comp = calcularMesCompetencia(dataRef, cartao.dia_fechamento)
+    return `${MESES_NOME[comp.mes - 1]} ${comp.ano}`
+  }
+
   const salvar = async () => {
-    if (!form.categoria || !form.valor || !form.tipo || !form.forma_pagamento) return
+    if (!form.categoria || !form.valor || !form.tipo) return
+    if (!form.cartao_id && !form.forma_pagamento) return
     setSaving(true)
 
+    const dados = {
+      ...form,
+      valor: parseFloat(form.valor),
+      cartao_id: form.cartao_id || null,
+      forma_pagamento: form.cartao_id ? 'Cartão de Crédito' : form.forma_pagamento,
+    }
+
     if (editando) {
-      await supabase
-        .from('lancamentos')
-        .update({
-          data: form.data || null,
-          tipo: form.tipo,
-          pessoa: form.pessoa,
-          categoria: form.categoria,
-          valor: parseFloat(form.valor),
-          forma_pagamento: form.forma_pagamento,
-          descricao: form.descricao,
-          observacao: form.observacao,
-        })
-        .eq('id', editando.id)
-      await recarregar()
+      await editarLancamento(editando.id, { ...dados, mes: editando.mes, ano: editando.ano })
     } else {
-      await adicionarLancamento({ ...form, valor: parseFloat(form.valor) })
+      await adicionarLancamento(dados)
     }
 
     setSaving(false)
@@ -96,11 +101,13 @@ export default function Lancamentos({ mes, ano }) {
     'Receita': 'green'
   }
 
+  const nomeCartao = (id) => cartoes.find(c => c.id === id)?.nome || 'Cartão'
+
   return (
     <div>
       <div className="page-header">
         <h2>Lançamentos</h2>
-        <p>{MESES_NOME[mes-1]} {ano}</p>
+        <p>{MESES_NOME[mes - 1]} {ano}</p>
       </div>
 
       <div className="cards-grid mb-24">
@@ -132,7 +139,7 @@ export default function Lancamentos({ mes, ano }) {
 
       <div className="table-wrap">
         <div className="table-header">
-          <h3>📋 Tabela de Lançamentos ({filtrados.length})</h3>
+          <h3>📋 Lançamentos ({filtrados.length})</h3>
           <div className="flex-center">
             <select
               className="mes-select"
@@ -160,7 +167,6 @@ export default function Lancamentos({ mes, ano }) {
 
         {filtrados.length === 0 ? (
           <div className="empty-state">
-            <Plus className="icon" />
             <p>Nenhum lançamento {filtroTipo !== 'Todos' || filtroCateg !== 'Todas' ? 'com estes filtros' : 'neste mês'}</p>
           </div>
         ) : (
@@ -184,25 +190,21 @@ export default function Lancamentos({ mes, ano }) {
                   <td>{l.categoria}</td>
                   <td>{l.descricao || '—'}</td>
                   <td>
-                    <span className={`badge ${l.forma_pagamento === 'Cartão de Crédito' ? 'purple' : 'gray'}`}>
-                      {l.forma_pagamento}
-                    </span>
+                    {l.cartao_id ? (
+                      <span className="badge purple">
+                        <CreditCard size={10} /> {nomeCartao(l.cartao_id)}
+                      </span>
+                    ) : (
+                      <span className="badge gray">{l.forma_pagamento}</span>
+                    )}
                   </td>
                   <td className="text-right text-red">{fmt(l.valor)}</td>
                   <td>
                     <div className="flex-center" style={{ justifyContent: 'center', gap: 6 }}>
-                      <button
-                        className="btn btn-ghost btn-icon btn-sm"
-                        title="Editar"
-                        onClick={() => abrirEditar(l)}
-                      >
+                      <button className="btn btn-ghost btn-icon btn-sm" title="Editar" onClick={() => abrirEditar(l)}>
                         <Edit2 size={13} />
                       </button>
-                      <button
-                        className="btn btn-danger btn-icon btn-sm"
-                        title="Excluir"
-                        onClick={() => excluirLancamento(l.id)}
-                      >
+                      <button className="btn btn-danger btn-icon btn-sm" title="Excluir" onClick={() => excluirLancamento(l.id)}>
                         <Trash2 size={13} />
                       </button>
                     </div>
@@ -251,31 +253,75 @@ export default function Lancamentos({ mes, ano }) {
                 <div className="form-group">
                   <label>Valor (R$)</label>
                   <input
-                    type="number"
-                    step="0.01"
-                    min="0"
+                    type="number" step="0.01" min="0"
                     value={form.valor}
                     onChange={e => setForm(f => ({ ...f, valor: e.target.value }))}
                   />
                 </div>
               </div>
 
-              <div className="form-row">
+              {/* Pagamento: cartão ou débito/pix/etc */}
+              <div className="form-group">
+                <label>Forma de Pagamento</label>
+                <select
+                  value={form.cartao_id ? 'cartao' : form.forma_pagamento}
+                  onChange={e => {
+                    if (e.target.value === 'cartao') {
+                      setForm(f => ({ ...f, forma_pagamento: 'Cartão de Crédito', cartao_id: cartoes[0]?.id || '' }))
+                    } else {
+                      setForm(f => ({ ...f, forma_pagamento: e.target.value, cartao_id: '' }))
+                    }
+                  }}
+                >
+                  <option value="Débito">Débito</option>
+                  <option value="Pix">Pix</option>
+                  <option value="Dinheiro">Dinheiro</option>
+                  <option value="Transferência">Transferência</option>
+                  <option value="Boleto">Boleto</option>
+                  {cartoes.length > 0 && <option value="cartao">Cartão de Crédito</option>}
+                </select>
+              </div>
+
+              {/* Seletor de cartão específico */}
+              {form.cartao_id !== '' && cartoes.length > 0 && (
                 <div className="form-group">
-                  <label>Forma de Pagamento</label>
-                  <select value={form.forma_pagamento} onChange={e => setForm(f => ({ ...f, forma_pagamento: e.target.value }))}>
-                    {FORMAS_PAG.map(p => <option key={p}>{p}</option>)}
+                  <label>Qual cartão?</label>
+                  <select
+                    value={form.cartao_id}
+                    onChange={e => setForm(f => ({ ...f, cartao_id: e.target.value }))}
+                  >
+                    {cartoes.map(c => (
+                      <option key={c.id} value={c.id}>
+                        {c.nome} (fecha dia {c.dia_fechamento})
+                      </option>
+                    ))}
                   </select>
                 </div>
-                <div className="form-group">
-                  <label>Data (opcional)</label>
-                  <input
-                    type="date"
-                    value={form.data}
-                    onChange={e => setForm(f => ({ ...f, data: e.target.value }))}
-                  />
-                </div>
+              )}
+
+              <div className="form-group">
+                <label>Data da compra {form.cartao_id ? '(importante para calcular a fatura)' : '(opcional)'}</label>
+                <input
+                  type="date"
+                  value={form.data}
+                  onChange={e => setForm(f => ({ ...f, data: e.target.value }))}
+                />
               </div>
+
+              {/* Preview do mês da fatura */}
+              {form.cartao_id && (
+                <div style={{
+                  background: 'var(--accent-glow)',
+                  border: '1px solid var(--accent)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '10px 14px',
+                  fontSize: '0.82rem',
+                  color: 'var(--accent)',
+                  marginBottom: 16,
+                }}>
+                  💳 Este gasto vai entrar na fatura de <strong>{previewMesCartao()}</strong>
+                </div>
+              )}
 
               <div className="form-group">
                 <label>Descrição</label>
