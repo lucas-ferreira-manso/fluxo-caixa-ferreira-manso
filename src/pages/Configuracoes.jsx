@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { useFinanceiro } from '../hooks/useFinanceiro'
 import { fmt, CATEGORIAS } from '../lib/utils'
-import { Save, RefreshCw } from 'lucide-react'
+import { Save } from 'lucide-react'
 
 export default function Configuracoes({ mes, ano }) {
-  const { loading, config, orcamentos, salvarConfig, salvarOrcamento, recarregar } = useFinanceiro(mes, ano)
+  const { loading, config, orcamentos, cartoes, salvarConfig, salvarOrcamento } = useFinanceiro(mes, ano)
   const [nomes, setNomes] = useState(null)
   const [cotacao, setCotacao] = useState(null)
   const [orcEdit, setOrcEdit] = useState({})
@@ -77,8 +77,7 @@ export default function Configuracoes({ mes, ano }) {
             <div className="form-group">
               <label>Cotação atual USD → BRL</label>
               <input
-                type="number"
-                step="0.01"
+                type="number" step="0.01"
                 value={cotacaoVal}
                 onChange={e => setCotacao(e.target.value)}
               />
@@ -96,6 +95,36 @@ export default function Configuracoes({ mes, ano }) {
         </div>
       </div>
 
+      {/* Cartões cadastrados */}
+      <div className="table-wrap mb-24">
+        <div className="table-header">
+          <h3>💳 Cartões Cadastrados</h3>
+          <span className="text-sm text-muted">Gerencie seus cartões na aba Cartão</span>
+        </div>
+        {cartoes.length === 0 ? (
+          <div className="empty-state"><p>Nenhum cartão cadastrado. Vá na aba Cartão para adicionar.</p></div>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>Nome</th>
+                <th>Dia de Fechamento</th>
+                <th>Dia de Vencimento</th>
+              </tr>
+            </thead>
+            <tbody>
+              {cartoes.map(c => (
+                <tr key={c.id}>
+                  <td><strong>💳 {c.nome}</strong></td>
+                  <td>Dia {c.dia_fechamento}</td>
+                  <td>Dia {c.dia_vencimento}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
       {/* Orçamentos por categoria */}
       <div className="table-wrap">
         <div className="table-header">
@@ -111,8 +140,7 @@ export default function Configuracoes({ mes, ano }) {
                 <div key={cat} style={{ background: 'var(--surface2)', borderRadius: 'var(--radius-sm)', padding: '12px 14px' }}>
                   <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>{cat}</label>
                   <input
-                    type="number"
-                    step="0.01"
+                    type="number" step="0.01"
                     value={editVal === 0 ? '' : editVal}
                     placeholder="0,00"
                     onChange={e => setOrcEdit(prev => ({ ...prev, [cat]: e.target.value }))}
@@ -125,38 +153,18 @@ export default function Configuracoes({ mes, ano }) {
         </div>
       </div>
 
-      {/* Dicas */}
-      <div className="table-wrap mt-24">
-        <div className="table-header"><h3>💡 Dicas de Uso</h3></div>
-        <div style={{ padding: 20, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          {[
-            ['📅 Lançamentos', 'Registre cada despesa na aba Lançamentos. Use o filtro de mês na barra lateral para navegar entre períodos.'],
-            ['💵 Cotação', 'Atualize a cotação do dólar toda vez que receber o salário para ter os cálculos precisos.'],
-            ['📊 Orçamentos', 'Defina orçamentos por categoria para o Dashboard mostrar alertas de estouro (🔴 Excedido).'],
-            ['🎯 Metas', 'Atualize o campo "Já Guardado" nas metas mensalmente para acompanhar seu progresso.'],
-            ['📈 Histórico', 'O histórico anual é gerado automaticamente a partir dos lançamentos de cada mês.'],
-            ['🔄 Compartilhamento', 'O app está na nuvem — qualquer pessoa com o link pode acessar e editar em tempo real.'],
-          ].map(([titulo, texto]) => (
-            <div key={titulo} style={{ background: 'var(--surface2)', borderRadius: 'var(--radius-sm)', padding: '14px 16px' }}>
-              <div style={{ fontWeight: 600, marginBottom: 6, fontSize: '0.875rem' }}>{titulo}</div>
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.6 }}>{texto}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Botão salvar flutuante */}
       {(nomes || cotacao !== null || Object.keys(orcEdit).length > 0) && (
-        <div style={{
-          position: 'fixed', bottom: 24, right: 24,
-          background: 'var(--accent)', color: '#0f0f13',
-          padding: '12px 24px', borderRadius: 100,
-          fontWeight: 600, fontSize: '0.9rem',
-          boxShadow: '0 8px 32px rgba(167,139,250,0.4)',
-          cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8,
-          border: 'none', fontFamily: 'var(--font-body)',
-        }}
+        <div
           onClick={salvarTudo}
+          style={{
+            position: 'fixed', bottom: 24, right: 24,
+            background: 'var(--accent)', color: '#0f0f13',
+            padding: '12px 24px', borderRadius: 100,
+            fontWeight: 600, fontSize: '0.9rem',
+            boxShadow: '0 8px 32px rgba(167,139,250,0.4)',
+            cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8,
+            border: 'none', fontFamily: 'var(--font-body)',
+          }}
         >
           <Save size={16} /> Salvar alterações
         </div>
