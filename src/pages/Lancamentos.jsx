@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useFinanceiro, calcularMesCompetencia } from '../hooks/useFinanceiro'
 import { fmt, CATEGORIAS, FORMAS_PAG, TIPOS, MESES_NOME } from '../lib/utils'
 import { Plus, Trash2, Edit2, CreditCard } from 'lucide-react'
+import { supabase } from '../lib/supabase'
 
 const FORM_VAZIO = {
   data: '', tipo: 'Despesa Fixa', pessoa: '', categoria: CATEGORIAS[0],
@@ -13,11 +14,11 @@ export default function Lancamentos({ mes, ano }) {
     loading, lancamentos, config, cartoes,
     despesasFixas, despesasVariaveis, investimentos,
     totalDespesas, totalCartao, saldoMes, receitaTotal,
-    adicionarLancamento, editarLancamento, excluirLancamento,
+    adicionarLancamento, excluirLancamento, recarregar
   } = useFinanceiro(mes, ano)
 
   const [modal, setModal] = useState(false)
-  const [editando, setEditando] = useState(null)
+  const [editandoId, setEditandoId] = useState(null)
   const [filtroTipo, setFiltroTipo] = useState('Todos')
   const [filtroCateg, setFiltroCateg] = useState('Todas')
   const [saving, setSaving] = useState(false)
@@ -35,20 +36,22 @@ export default function Lancamentos({ mes, ano }) {
   })
 
   const abrirNovo = () => {
-    setEditando(null)
+    setEditandoId(null)
     setForm(FORM_VAZIO)
     setModal(true)
   }
 
   const abrirEditar = (l) => {
-    setEditando(l)
+    setEditandoId(l.id)
+    // Sempre lê direto do objeto mais recente da lista
     setForm({
       data: l.data || '',
-      tipo: l.tipo,
-      pessoa: l.pessoa,
-      categoria: l.categoria,
-      valor: l.valor,
-      forma_pagamento: l.forma_pagamento,
+      tipo: l.tipo || 'Despesa Fixa',
+      pessoa: l.pessoa || '',
+      categoria: l.categoria || CATEGORIAS[0],
+      valor: l.valor || '',
+      // Se tem cartao_id, forma de pagamento é cartão
+      forma_pagamento: l.cartao_id ? 'Cartão de Crédito' : (l.forma_pagamento || 'Débito'),
       cartao_id: l.cartao_id || '',
       descricao: l.descricao || '',
       observacao: l.observacao || '',
@@ -58,11 +61,10 @@ export default function Lancamentos({ mes, ano }) {
 
   const fecharModal = () => {
     setModal(false)
-    setEditando(null)
+    setEditandoId(null)
     setForm(FORM_VAZIO)
   }
 
-  // Preview do mês que vai entrar quando for cartão
   const previewMesCartao = () => {
     if (!form.cartao_id) return null
     const cartao = cartoes.find(c => c.id === form.cartao_id)
@@ -74,22 +76,41 @@ export default function Lancamentos({ mes, ano }) {
 
   const salvar = async () => {
     if (!form.categoria || !form.valor || !form.tipo) return
-    if (!form.cartao_id && !form.forma_pagamento) return
     setSaving(true)
 
+    const cartao = form.cartao_id ? cartoes.find(c => c.id === form.cartao_id) : null
+
+    // Calcula mês de competência
+    let mesComp = mes
+    let anoComp = ano
+    if (cartao) {
+      const dataRef = form.data || new Date().toISOString().slice(0, 10)
+      const comp = calcularMesCompetencia(dataRef, cartao.dia_fechamento)
+      mesComp = comp.mes
+      anoComp = comp.ano
+    }
+
     const dados = {
-      ...form,
+      data: form.data || null,
+      tipo: form.tipo,
+      pessoa: form.pessoa,
+      categoria: form.categoria,
       valor: parseFloat(form.valor),
-      cartao_id: form.cartao_id || null,
       forma_pagamento: form.cartao_id ? 'Cartão de Crédito' : form.forma_pagamento,
+      cartao_id: form.cartao_id || null,
+      descricao: form.descricao,
+      observacao: form.observacao,
+      mes: mesComp,
+      ano: anoComp,
     }
 
-    if (editando) {
-      await editarLancamento(editando.id, { ...dados, mes: editando.mes, ano: editando.ano })
+    if (editandoId) {
+      await supabase.from('lancamentos').update(dados).eq('id', editandoId)
     } else {
-      await adicionarLancamento(dados)
+      await supabase.from('lancamentos').insert([dados])
     }
 
+    await recarregar()
     setSaving(false)
     fecharModal()
   }
@@ -220,7 +241,7 @@ export default function Lancamentos({ mes, ano }) {
         <div className="modal-overlay" onClick={fecharModal}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div className="modal-head">
-              <h3>{editando ? '✏️ Editar Lançamento' : '+ Novo Lançamento'}</h3>
+              <h3>{editandoId ? '✏️ Editar Lançamento' : '+ Novo Lançamento'}</h3>
               <button className="btn btn-ghost btn-icon btn-sm" onClick={fecharModal}>×</button>
             </div>
 
@@ -260,7 +281,6 @@ export default function Lancamentos({ mes, ano }) {
                 </div>
               </div>
 
-              {/* Pagamento: cartão ou débito/pix/etc */}
               <div className="form-group">
                 <label>Forma de Pagamento</label>
                 <select
@@ -282,7 +302,6 @@ export default function Lancamentos({ mes, ano }) {
                 </select>
               </div>
 
-              {/* Seletor de cartão específico */}
               {form.cartao_id !== '' && cartoes.length > 0 && (
                 <div className="form-group">
                   <label>Qual cartão?</label>
@@ -308,7 +327,6 @@ export default function Lancamentos({ mes, ano }) {
                 />
               </div>
 
-              {/* Preview do mês da fatura */}
               {form.cartao_id && (
                 <div style={{
                   background: 'var(--accent-glow)',
@@ -344,7 +362,7 @@ export default function Lancamentos({ mes, ano }) {
             <div className="modal-foot">
               <button className="btn btn-ghost" onClick={fecharModal}>Cancelar</button>
               <button className="btn btn-primary" onClick={salvar} disabled={saving}>
-                {saving ? 'Salvando...' : editando ? '✓ Salvar alterações' : 'Salvar lançamento'}
+                {saving ? 'Salvando...' : editandoId ? '✓ Salvar alterações' : 'Salvar lançamento'}
               </button>
             </div>
           </div>
