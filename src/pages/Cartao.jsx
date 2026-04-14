@@ -98,6 +98,9 @@ export default function Cartao({ mes, ano }) {
     total: lancamentos.filter(l => l.cartao_id === c.id).reduce((a, l) => a + l.valor, 0)
   }))
 
+  // Lançamentos de cartão sem cartao_id vinculado (lançamentos antigos)
+  const semCartaoVinculado = lancamentos.filter(l => !l.cartao_id && l.forma_pagamento === 'Cartão de Crédito').reduce((a, l) => a + l.valor, 0)
+
   // ---- Gerenciamento de cartões ----
   const salvarOrc = async (cat) => {
     await salvarOrcamento(cat, parseFloat(novoOrc) || 0)
@@ -263,7 +266,14 @@ export default function Cartao({ mes, ano }) {
                   </div>
                 )
               })}
-              {cartoes.length === 0 && <div className="empty-state"><p>Nenhum cartão cadastrado</p></div>}
+              {semCartaoVinculado > 0 && (
+                <div className="card yellow">
+                  <div style={{ fontWeight: 700, marginBottom: 8 }}>💳 Sem cartão vinculado</div>
+                  <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.6rem', color: 'var(--yellow)' }}>{fmt(semCartaoVinculado)}</div>
+                  <div className="text-muted text-sm mt-4">Edite esses lançamentos para vincular ao cartão correto</div>
+                </div>
+              )}
+              {cartoes.length === 0 && semCartaoVinculado === 0 && <div className="empty-state"><p>Nenhum cartão cadastrado</p></div>}
             </div>
           </div>
 
