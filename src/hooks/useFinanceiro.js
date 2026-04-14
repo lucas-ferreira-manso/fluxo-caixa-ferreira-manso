@@ -74,7 +74,7 @@ export function useFinanceiro(mes = MES_ATUAL, ano = ANO_ATUAL) {
   const despesasVariaveis = lancamentos.filter(l => l.tipo === 'Despesa Variável').reduce((a, l) => a + l.valor, 0)
   const investimentos = lancamentos.filter(l => l.tipo === 'Investimento').reduce((a, l) => a + l.valor, 0)
   const totalDespesas = despesasFixas + despesasVariaveis + investimentos
-  const totalCartao = lancamentos.filter(l => l.cartao_id).reduce((a, l) => a + l.valor, 0)
+  const totalCartao = lancamentos.filter(l => l.cartao_id || l.forma_pagamento === 'Cartão de Crédito').reduce((a, l) => a + l.valor, 0)
   const saldoMes = receitaTotal - totalDespesas
 
   const gastosPorCategoria = lancamentos
@@ -85,7 +85,7 @@ export function useFinanceiro(mes = MES_ATUAL, ano = ANO_ATUAL) {
     }, {})
 
   const cartaoPorCategoria = lancamentos
-    .filter(l => l.cartao_id)
+    .filter(l => l.cartao_id || l.forma_pagamento === 'Cartão de Crédito')
     .reduce((acc, l) => {
       acc[l.categoria] = (acc[l.categoria] || 0) + l.valor
       return acc
