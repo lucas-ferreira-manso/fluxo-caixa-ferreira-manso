@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Routes, Route, NavLink } from 'react-router-dom'
-import { LayoutDashboard, TrendingUp, ListChecks, CreditCard, Target, BarChart3, Settings, LogOut, FileUp } from 'lucide-react'
+import { LayoutDashboard, TrendingUp, ListChecks, CreditCard, Target, BarChart3, Settings, LogOut } from 'lucide-react'
 import { useAuth } from './hooks/useAuth'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
@@ -10,7 +10,6 @@ import Cartao from './pages/Cartao'
 import Metas from './pages/Metas'
 import Historico from './pages/Historico'
 import Configuracoes from './pages/Configuracoes'
-import ImportarCSV from './pages/ImportarCSV'
 
 const MESES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
 
@@ -19,7 +18,6 @@ const navItems = [
   { to: '/receitas', icon: TrendingUp, label: 'Receitas' },
   { to: '/lancamentos', icon: ListChecks, label: 'Lançamentos' },
   { to: '/cartao', icon: CreditCard, label: 'Cartão' },
-  { to: '/importar', icon: FileUp, label: 'Importar CSV' },
   { to: '/metas', icon: Target, label: 'Metas' },
   { to: '/historico', icon: BarChart3, label: 'Histórico' },
   { to: '/configuracoes', icon: Settings, label: 'Configurações' },
@@ -103,7 +101,6 @@ export default function App() {
           <Route path="/receitas" element={<Receitas mes={mes} ano={ano} />} />
           <Route path="/lancamentos" element={<Lancamentos mes={mes} ano={ano} />} />
           <Route path="/cartao" element={<Cartao mes={mes} ano={ano} />} />
-          <Route path="/importar" element={<ImportarCSV mes={mes} ano={ano} />} />
           <Route path="/metas" element={<Metas mes={mes} ano={ano} />} />
           <Route path="/historico" element={<Historico />} />
           <Route path="/configuracoes" element={<Configuracoes mes={mes} ano={ano} />} />
