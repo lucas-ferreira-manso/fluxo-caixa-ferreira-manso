@@ -1,10 +1,9 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useFinanceiro, calcularMesCompetencia } from '../hooks/useFinanceiro'
 import { fmt, CATEGORIAS, MESES_NOME } from '../lib/utils'
-import { Upload, Check, X, AlertCircle } from 'lucide-react'
+import { Upload, Check, AlertCircle } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
-// Mapeamento automático de palavras-chave para categorias
 const MAPA_CATEGORIAS = {
   '🍽️ Alimentação': ['restauran', 'cafe', 'coffee', 'lanche', 'pizza', 'burger', 'sushi', 'ifood', 'rappi', 'delivery', 'padaria', 'armazem', 'savas', 'cultura primavera', 'quatro estacoes', 'primavera'],
   '🛒 Supermercado': ['angeloni', 'mercado', 'supermercado', 'carrefour', 'atacadao', 'bistek', 'cbhomemarket', 'hortifrutti', 'hortifruti'],
@@ -16,7 +15,7 @@ const MAPA_CATEGORIAS = {
   '📱 Assinaturas/Tech': ['google', 'apple', 'youtube', 'icloud', 'adobe', 'microsoft', 'amazon', 'dropbox', 'dl*google', 'applecombill'],
   '🏠 Moradia': ['aluguel', 'condominio', 'agua', 'luz', 'energia', 'gas', 'limpeza', 'faxina', 'moveis', 'emporiodosofa', 'balaroti', 'mercadolivre', 'leroy', 'telhanorte'],
   '✈️ Viagem': ['gol', 'latam', 'azul', 'hotel', 'airbnb', 'booking', 'aerea', 'passagem'],
-  '💆 Bem-estar': ['academia', 'pilates', 'yoga', 'spa', 'salao', 'barbearia', 'estetica'],
+  '💆 Bem-estar': ['academia', 'pilates', 'yoga', 'spa', 'salao', 'barbearia', 'estetica', 'balarotti'],
   '🐾 Pet': ['pet', 'veterinario', 'animal', 'racao'],
 }
 
@@ -26,6 +25,11 @@ function detectarCategoria(titulo) {
     if (keywords.some(kw => lower.includes(kw))) return categoria
   }
   return '🔧 Outros'
+}
+
+function gerarHash(date, title, amount) {
+  // Hash simples e determinístico: data+titulo+valor
+  return `nubank_${date}_${title.toLowerCase().replace(/\s+/g, '_')}_${amount}`
 }
 
 function parsearCSVNubank(texto) {
@@ -40,7 +44,12 @@ function parsearCSVNubank(texto) {
     const amount = parseFloat(partes[partes.length - 1].trim())
     const title = partes.slice(1, partes.length - 1).join(',').trim()
     if (!date || isNaN(amount) || amount <= 0) continue
-    itens.push({ date, title, amount })
+    itens.push({
+      date,
+      title,
+      amount,
+      hash: gerarHash(date, title, amount),
+    })
   }
   return itens
 }
@@ -52,26 +61,43 @@ export default function ImportarCSV({ mes, ano }) {
   const [pessoa, setPessoa] = useState('Pessoa 1')
   const [importando, setImportando] = useState(false)
   const [resultado, setResultado] = useState(null)
-  const [etapa, setEtapa] = useState('upload') // upload | revisar | concluido
+  const [etapa, setEtapa] = useState('upload')
+  const [verificando, setVerificando] = useState(false)
   const fileRef = useRef()
 
   const nubank = cartoes.find(c => c.nome.toLowerCase().includes('nubank'))
 
-  const handleArquivo = (e) => {
-    const file = e.target.files[0]
+  // Verifica quais hashes já existem no banco
+  const verificarDuplicatas = async (itensParseados) => {
+    setVerificando(true)
+    const hashes = itensParseados.map(i => i.hash)
+    const { data } = await supabase
+      .from('lancamentos')
+      .select('importacao_hash')
+      .in('importacao_hash', hashes)
+
+    const hashesExistentes = new Set((data || []).map(r => r.importacao_hash))
+
+    const comStatus = itensParseados.map(item => ({
+      ...item,
+      categoria: detectarCategoria(item.title),
+      tipo: 'Despesa Variável',
+      selecionado: !hashesExistentes.has(item.hash), // desmarca os já existentes
+      jaExiste: hashesExistentes.has(item.hash),
+    }))
+
+    setVerificando(false)
+    return comStatus
+  }
+
+  const handleArquivo = async (file) => {
     if (!file) return
     const reader = new FileReader()
-    reader.onload = (ev) => {
-      const texto = ev.target.result
-      const parsed = parsearCSVNubank(texto)
-      const comCategoria = parsed.map(item => ({
-        ...item,
-        categoria: detectarCategoria(item.title),
-        tipo: 'Despesa Variável',
-        selecionado: true,
-      }))
-      setItens(comCategoria)
+    reader.onload = async (ev) => {
+      const parsed = parsearCSVNubank(ev.target.result)
       setCartaoId(nubank?.id || cartoes[0]?.id || '')
+      const comStatus = await verificarDuplicatas(parsed)
+      setItens(comStatus)
       setEtapa('revisar')
     }
     reader.readAsText(file)
@@ -109,15 +135,24 @@ export default function ImportarCSV({ mes, ano }) {
         cartao_id: cartaoId || null,
         descricao: item.title,
         observacao: 'Importado do CSV Nubank',
+        importacao_hash: item.hash,
         mes: comp.mes,
         ano: comp.ano,
       }
     })
 
-    const { error } = await supabase.from('lancamentos').insert(lancamentos)
+    // upsert: se o hash já existir, atualiza; se não existir, insere
+    const { error } = await supabase
+      .from('lancamentos')
+      .upsert(lancamentos, { onConflict: 'importacao_hash', ignoreDuplicates: true })
+
     await recarregar()
     setImportando(false)
-    setResultado({ total: lancamentos.length, erro: error?.message })
+    setResultado({
+      total: lancamentos.length,
+      pulados: itens.filter(i => i.jaExiste).length,
+      erro: error?.message
+    })
     setEtapa('concluido')
   }
 
@@ -129,20 +164,21 @@ export default function ImportarCSV({ mes, ano }) {
   }
 
   const selecionados = itens.filter(i => i.selecionado)
+  const jaExistem = itens.filter(i => i.jaExiste)
   const totalSelecionado = selecionados.reduce((a, i) => a + i.amount, 0)
 
   return (
     <div>
       <div className="page-header">
         <h2>Importar Fatura</h2>
-        <p>Importe o CSV do Nubank para preencher os lançamentos automaticamente</p>
+        <p>Importe o CSV do Nubank — duplicatas são detectadas automaticamente</p>
       </div>
 
       {/* ETAPA 1 — Upload */}
       {etapa === 'upload' && (
         <div style={{ maxWidth: 560 }}>
           <div className="table-wrap mb-24">
-            <div className="table-header"><h3>⚙️ Configurações da importação</h3></div>
+            <div className="table-header"><h3>⚙️ Configurações</h3></div>
             <div style={{ padding: 20 }}>
               <div className="form-group">
                 <label>Cartão</label>
@@ -168,30 +204,13 @@ export default function ImportarCSV({ mes, ano }) {
               padding: '48px 24px',
               textAlign: 'center',
               cursor: 'pointer',
-              transition: 'border-color 0.15s',
               background: 'var(--surface)',
             }}
             onClick={() => fileRef.current?.click()}
             onDragOver={e => e.preventDefault()}
             onDrop={e => {
               e.preventDefault()
-              const file = e.dataTransfer.files[0]
-              if (file) {
-                const reader = new FileReader()
-                reader.onload = ev => {
-                  const parsed = parsearCSVNubank(ev.target.result)
-                  const comCategoria = parsed.map(item => ({
-                    ...item,
-                    categoria: detectarCategoria(item.title),
-                    tipo: 'Despesa Variável',
-                    selecionado: true,
-                  }))
-                  setItens(comCategoria)
-                  setCartaoId(nubank?.id || cartoes[0]?.id || '')
-                  setEtapa('revisar')
-                }
-                reader.readAsText(file)
-              }
+              handleArquivo(e.dataTransfer.files[0])
             }}
           >
             <Upload size={40} style={{ color: 'var(--accent)', margin: '0 auto 16px' }} />
@@ -205,40 +224,66 @@ export default function ImportarCSV({ mes, ano }) {
               fontSize: '0.8rem',
               color: 'var(--text-muted)',
             }}>
-              No Nubank: app → Cartão de Crédito → Fatura → Exportar → CSV
+              Nubank: app → Cartão → Fatura → Exportar → CSV
             </div>
-            <input ref={fileRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={handleArquivo} />
+            <input ref={fileRef} type="file" accept=".csv" style={{ display: 'none' }}
+              onChange={e => handleArquivo(e.target.files[0])} />
           </div>
         </div>
       )}
 
+      {/* Verificando duplicatas */}
+      {verificando && (
+        <div className="loading"><div className="spinner" /> Verificando duplicatas...</div>
+      )}
+
       {/* ETAPA 2 — Revisar */}
-      {etapa === 'revisar' && (
+      {etapa === 'revisar' && !verificando && (
         <div>
-          {/* Resumo */}
           <div className="cards-grid mb-24">
             <div className="card purple">
-              <div className="card-label">Total de transações</div>
+              <div className="card-label">Total no arquivo</div>
               <div className="card-value">{itens.length}</div>
             </div>
             <div className="card green">
-              <div className="card-label">Selecionadas</div>
+              <div className="card-label">Novos para importar</div>
               <div className="card-value">{selecionados.length}</div>
             </div>
+            <div className="card yellow">
+              <div className="card-label">Já existem (ignorados)</div>
+              <div className="card-value">{jaExistem.length}</div>
+              <div className="card-sub">detectados automaticamente</div>
+            </div>
             <div className="card red">
-              <div className="card-label">Total selecionado</div>
+              <div className="card-label">Total a importar</div>
               <div className="card-value">{fmt(totalSelecionado)}</div>
             </div>
           </div>
 
+          {jaExistem.length > 0 && (
+            <div style={{
+              background: 'var(--yellow-bg)',
+              border: '1px solid var(--yellow)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '12px 16px',
+              fontSize: '0.82rem',
+              color: 'var(--yellow)',
+              marginBottom: 20,
+            }}>
+              ⚠️ <strong>{jaExistem.length} transações</strong> já existem no app e foram desmarcadas automaticamente para evitar duplicatas. Você pode ver elas na lista abaixo (em cinza).
+            </div>
+          )}
+
           <div className="table-wrap mb-24">
             <div className="table-header">
-              <h3>Revise as transações antes de importar</h3>
+              <h3>Revise antes de importar</h3>
               <div className="flex-center">
-                <button className="btn btn-ghost btn-sm" onClick={() => setItens(p => p.map(i => ({ ...i, selecionado: true })))}>
-                  Selecionar todos
+                <button className="btn btn-ghost btn-sm"
+                  onClick={() => setItens(p => p.map(i => ({ ...i, selecionado: !i.jaExiste })))}>
+                  Selecionar novos
                 </button>
-                <button className="btn btn-ghost btn-sm" onClick={() => setItens(p => p.map(i => ({ ...i, selecionado: false })))}>
+                <button className="btn btn-ghost btn-sm"
+                  onClick={() => setItens(p => p.map(i => ({ ...i, selecionado: false })))}>
                   Desmarcar todos
                 </button>
               </div>
@@ -253,14 +298,17 @@ export default function ImportarCSV({ mes, ano }) {
                   <th>Tipo</th>
                   <th className="text-right">Valor</th>
                   <th>Fatura</th>
+                  <th>Status</th>
                 </tr>
               </thead>
               <tbody>
                 {itens.map((item, i) => {
                   const cartao = cartoes.find(c => c.id === cartaoId)
-                  const comp = cartao ? calcularMesCompetencia(item.date, cartao.dia_fechamento) : { mes, ano }
+                  const comp = cartao
+                    ? calcularMesCompetencia(item.date, cartao.dia_fechamento)
+                    : { mes, ano }
                   return (
-                    <tr key={i} style={{ opacity: item.selecionado ? 1 : 0.35 }}>
+                    <tr key={i} style={{ opacity: item.selecionado ? 1 : 0.4 }}>
                       <td>
                         <input
                           type="checkbox"
@@ -270,12 +318,13 @@ export default function ImportarCSV({ mes, ano }) {
                         />
                       </td>
                       <td className="text-muted text-sm">{item.date}</td>
-                      <td style={{ maxWidth: 200, fontSize: '0.82rem' }}>{item.title}</td>
+                      <td style={{ maxWidth: 180, fontSize: '0.82rem' }}>{item.title}</td>
                       <td>
                         <select
                           value={item.categoria}
                           onChange={e => alterarCategoria(i, e.target.value)}
                           style={{ padding: '4px 6px', fontSize: '0.78rem' }}
+                          disabled={item.jaExiste}
                         >
                           {CATEGORIAS.map(c => <option key={c}>{c}</option>)}
                         </select>
@@ -285,6 +334,7 @@ export default function ImportarCSV({ mes, ano }) {
                           value={item.tipo}
                           onChange={e => alterarTipo(i, e.target.value)}
                           style={{ padding: '4px 6px', fontSize: '0.78rem' }}
+                          disabled={item.jaExiste}
                         >
                           <option>Despesa Fixa</option>
                           <option>Despesa Variável</option>
@@ -293,6 +343,12 @@ export default function ImportarCSV({ mes, ano }) {
                       <td className="text-right text-red">{fmt(item.amount)}</td>
                       <td className="text-sm" style={{ color: 'var(--accent)' }}>
                         {MESES_NOME[comp.mes - 1].slice(0, 3)} {comp.ano}
+                      </td>
+                      <td>
+                        {item.jaExiste
+                          ? <span className="badge yellow">já existe</span>
+                          : <span className="badge green">novo</span>
+                        }
                       </td>
                     </tr>
                   )
@@ -308,7 +364,9 @@ export default function ImportarCSV({ mes, ano }) {
               onClick={importar}
               disabled={importando || selecionados.length === 0}
             >
-              {importando ? 'Importando...' : `Importar ${selecionados.length} lançamentos (${fmt(totalSelecionado)})`}
+              {importando
+                ? 'Importando...'
+                : `Importar ${selecionados.length} lançamentos (${fmt(totalSelecionado)})`}
             </button>
           </div>
         </div>
@@ -325,19 +383,28 @@ export default function ImportarCSV({ mes, ano }) {
             </>
           ) : (
             <>
-              <div style={{ width: 72, height: 72, borderRadius: '50%', background: 'var(--green-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px' }}>
+              <div style={{
+                width: 72, height: 72, borderRadius: '50%',
+                background: 'var(--green-bg)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                margin: '0 auto 20px'
+              }}>
                 <Check size={36} style={{ color: 'var(--green)' }} />
               </div>
               <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.8rem', marginBottom: 8 }}>
                 Importação concluída!
               </h3>
-              <p className="text-muted mb-24">
-                {resultado.total} lançamentos importados com sucesso.<br />
-                Eles já aparecem nos meses corretos baseados no fechamento do cartão.
+              <p className="text-muted mb-8">
+                <strong style={{ color: 'var(--green)' }}>{resultado.total} lançamentos</strong> importados com sucesso.
               </p>
+              {resultado.pulados > 0 && (
+                <p className="text-muted text-sm mb-24">
+                  {resultado.pulados} transações já existiam e foram ignoradas.
+                </p>
+              )}
             </>
           )}
-          <div className="flex-center" style={{ justifyContent: 'center', gap: 12 }}>
+          <div className="flex-center" style={{ justifyContent: 'center', gap: 12, marginTop: 24 }}>
             <button className="btn btn-ghost" onClick={reiniciar}>Importar outro arquivo</button>
             <a href="/" className="btn btn-primary">Ver Dashboard</a>
           </div>
