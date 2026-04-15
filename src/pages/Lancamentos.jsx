@@ -97,7 +97,7 @@ export default function Lancamentos({ mes, ano }) {
 
   // Estados do importador de extrato
   const [itensExtrato, setItensExtrato] = useState([])
-  const [pessoaExtrato, setPessoaExtrato] = useState('Pessoa 1')
+  const [pessoaExtrato, setPessoaExtrato] = useState('Lucas')
   const [importando, setImportando] = useState(false)
   const [verificando, setVerificando] = useState(false)
   const [resultado, setResultado] = useState(null)
@@ -106,8 +106,8 @@ export default function Lancamentos({ mes, ano }) {
 
   if (loading) return <div className="loading"><div className="spinner" /> Carregando...</div>
 
-  const p1 = config.nome_pessoa1 || 'Pessoa 1'
-  const p2 = config.nome_pessoa2 || 'Esposa'
+  const p1 = config.nome_pessoa1 || 'Lucas'
+  const p2 = config.nome_pessoa2 || 'Lais'
 
   const filtrados = lancamentos.filter(l => {
     if (filtroTipo !== 'Todos' && l.tipo !== filtroTipo) return false
