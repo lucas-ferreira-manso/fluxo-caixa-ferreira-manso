@@ -69,7 +69,7 @@ export default function Cartao({ mes, ano }) {
   const [abaAtiva, setAbaAtiva] = useState('resumo') // 'resumo' | 'importar'
   const [itens, setItens] = useState([])
   const [cartaoImportId, setCartaoImportId] = useState('')
-  const [pessoaImport, setPessoaImport] = useState('Pessoa 1')
+  const [pessoaImport, setPessoaImport] = useState('Lucas')
   const [importando, setImportando] = useState(false)
   const [verificando, setVerificando] = useState(false)
   const [resultado, setResultado] = useState(null)
@@ -357,8 +357,8 @@ export default function Cartao({ mes, ano }) {
                   <div className="form-group">
                     <label>Responsável</label>
                     <select value={pessoaImport} onChange={e => setPessoaImport(e.target.value)}>
-                      <option>Pessoa 1</option>
-                      <option>Esposa</option>
+                      <option>Lucas</option>
+                      <option>Lais</option>
                       <option>Casal</option>
                     </select>
                   </div>
