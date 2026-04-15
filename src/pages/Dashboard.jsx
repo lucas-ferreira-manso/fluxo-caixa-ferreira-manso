@@ -4,7 +4,19 @@ import { fmt, fmtPct, CATEGORIAS, corStatus, MESES_NOME } from '../lib/utils'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { supabase } from '../lib/supabase'
 
+// Hook para detectar mobile
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768)
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth <= 768)
+    window.addEventListener('resize', handler)
+    return () => window.removeEventListener('resize', handler)
+  }, [])
+  return isMobile
+}
+
 export default function Dashboard({ mes, ano }) {
+  const isMobile = useIsMobile()
   const {
     loading, receitaTotal, despesasFixas, despesasVariaveis,
     totalDespesas, totalCartao, saldoMes, gastosPorCategoria,
@@ -22,17 +34,13 @@ export default function Dashboard({ mes, ano }) {
   useEffect(() => {
     const carregarDados = async () => {
       setLoadingProximo(true)
-
       const [faturas, fixas, invRes, aportesRes] = await Promise.all([
         supabase.from('lancamentos').select('*').eq('mes', proximoMes).eq('ano', proximoAno).not('cartao_id', 'is', null),
         supabase.from('lancamentos').select('*').eq('mes', mes).eq('ano', ano).eq('tipo', 'Despesa Fixa').is('cartao_id', null),
         supabase.from('investimentos').select('*').eq('ativo', true),
         supabase.from('aportes').select('*'),
       ])
-
       setProximoMesData({ faturas: faturas.data || [], fixas: fixas.data || [] })
-
-      // Calcula patrimônio total investido
       const invs = invRes.data || []
       const aps = aportesRes.data || []
       const totalInv = invs.reduce((s, inv) => {
@@ -40,20 +48,23 @@ export default function Dashboard({ mes, ano }) {
         return s + inv.saldo_inicial + aportadoInv
       }, 0)
       setPatrimonioInvestido(totalInv)
-
-      // Aportes do mês atual
-      const apMes = aps.filter(a => a.mes === mes && a.ano === ano).reduce((s, a) => s + a.valor, 0)
-      setTotalAportadoMes(apMes)
-
+      setTotalAportadoMes(aps.filter(a => a.mes === mes && a.ano === ano).reduce((s, a) => s + a.valor, 0))
       setLoadingProximo(false)
     }
-
     if (!loading) carregarDados()
   }, [mes, ano, proximoMes, proximoAno, loading])
 
   if (loading) return <div className="loading"><div className="spinner" /> Carregando...</div>
 
   const pctPoupado = receitaTotal > 0 ? saldoMes / receitaTotal : 0
+  const totalFaturasProximo = proximoMesData.faturas.reduce((a, l) => a + l.valor, 0)
+  const totalFixasProximo = proximoMesData.fixas.reduce((a, l) => a + l.valor, 0)
+  const totalComprometido = totalFaturasProximo + totalFixasProximo
+  const saldoProjetado = receitaTotal - totalComprometido
+  const faturasPorCartao = cartoes.map(c => ({
+    ...c,
+    total: proximoMesData.faturas.filter(l => l.cartao_id === c.id).reduce((a, l) => a + l.valor, 0)
+  })).filter(c => c.total > 0)
 
   const dadosCategoria = CATEGORIAS.map(cat => {
     const orc = orcamentos.find(o => o.categoria === cat)
@@ -70,16 +81,130 @@ export default function Dashboard({ mes, ano }) {
     { label: '💰 Poupança', pct: 0.2, realizado: Math.max(saldoMes, 0) },
   ]
 
-  const totalFaturasProximo = proximoMesData.faturas.reduce((a, l) => a + l.valor, 0)
-  const totalFixasProximo = proximoMesData.fixas.reduce((a, l) => a + l.valor, 0)
-  const totalComprometido = totalFaturasProximo + totalFixasProximo
-  const saldoProjetado = receitaTotal - totalComprometido
+  // ---- MOBILE VIEW ----
+  if (isMobile) {
+    return (
+      <div>
+        <div className="page-header">
+          <h2>Dashboard</h2>
+          <p>{MESES_NOME[mes - 1]} {ano}</p>
+        </div>
 
-  const faturasPorCartao = cartoes.map(c => ({
-    ...c,
-    total: proximoMesData.faturas.filter(l => l.cartao_id === c.id).reduce((a, l) => a + l.valor, 0)
-  })).filter(c => c.total > 0)
+        {/* Cards principais 2x2 */}
+        <div className="cards-grid mb-16">
+          <SummaryCard color="green" label="Receita" value={fmt(receitaTotal)} />
+          <SummaryCard color="red" label="Despesas" value={fmt(totalDespesas)} />
+          <SummaryCard color={saldoMes >= 0 ? 'green' : 'red'} label="Saldo" value={fmt(saldoMes)} sub={fmtPct(pctPoupado)} />
+          <SummaryCard color="purple" label="Cartão" value={fmt(totalCartao)} />
+        </div>
 
+        {/* Patrimônio investido */}
+        {patrimonioInvestido > 0 && (
+          <div className="card" style={{ borderTop: '2px solid var(--green)', marginBottom: 16 }}>
+            <div className="card-label">💰 Total Investido</div>
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.5rem', color: 'var(--green)', marginTop: 4 }}>
+              {fmt(patrimonioInvestido)}
+            </div>
+            {totalAportadoMes > 0 && (
+              <div className="card-sub">+{fmt(totalAportadoMes)} aportado em {MESES_NOME[mes-1]}</div>
+            )}
+          </div>
+        )}
+
+        {/* Projeção próximo mês — compacta */}
+        <div className="table-wrap mb-16" style={{ borderTop: '2px solid var(--accent)' }}>
+          <div className="table-header">
+            <h3>🔮 Próximo mês — {MESES_NOME[proximoMes - 1]}</h3>
+          </div>
+          <div style={{ padding: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <div style={{ background: 'var(--surface2)', borderRadius: 'var(--radius-sm)', padding: '10px 12px' }}>
+                <div className="card-label">💳 Faturas</div>
+                <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.1rem', color: 'var(--accent)' }}>{fmt(totalFaturasProximo)}</div>
+                {faturasPorCartao.map(c => (
+                  <div key={c.id} className="card-sub">{c.nome}: {fmt(c.total)}</div>
+                ))}
+              </div>
+              <div style={{ background: 'var(--surface2)', borderRadius: 'var(--radius-sm)', padding: '10px 12px' }}>
+                <div className="card-label">🔁 Fixas</div>
+                <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.1rem', color: 'var(--red)' }}>{fmt(totalFixasProximo)}</div>
+              </div>
+              <div style={{ background: 'var(--surface2)', borderRadius: 'var(--radius-sm)', padding: '10px 12px' }}>
+                <div className="card-label">📊 Comprometido</div>
+                <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.1rem', color: 'var(--yellow)' }}>{fmt(totalComprometido)}</div>
+              </div>
+              <div style={{ background: 'var(--surface2)', borderRadius: 'var(--radius-sm)', padding: '10px 12px' }}>
+                <div className="card-label">💰 Saldo Projetado</div>
+                <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.1rem', color: saldoProjetado >= 0 ? 'var(--green)' : 'var(--red)' }}>{fmt(saldoProjetado)}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Regra 50-30-20 compacta */}
+        <div className="table-wrap mb-16">
+          <div className="table-header"><h3>📏 Regra 50-30-20</h3></div>
+          <div style={{ padding: 16 }}>
+            {regra.map(r => {
+              const ideal = receitaTotal * r.pct
+              const pct = ideal > 0 ? Math.min(r.realizado / ideal, 1.5) : 0
+              const cor = r.realizado <= ideal ? 'var(--green)' : 'var(--red)'
+              return (
+                <div key={r.label} style={{ marginBottom: 12 }}>
+                  <div className="flex-between mb-4">
+                    <span style={{ fontSize: '0.8rem', fontWeight: 500 }}>{r.label}</span>
+                    <span style={{ fontSize: '0.75rem', color: r.realizado <= ideal ? 'var(--green)' : 'var(--red)' }}>
+                      {fmt(r.realizado)} / {fmt(ideal)}
+                    </span>
+                  </div>
+                  <div className="progress-bar">
+                    <div className="progress-fill" style={{ width: `${pct * 100}%`, background: cor }} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* Top categorias */}
+        {dadosCategoria.length > 0 && (
+          <div className="table-wrap">
+            <div className="table-header"><h3>📂 Top Categorias</h3></div>
+            <div style={{ padding: '0 0 8px' }}>
+              {dadosCategoria
+                .sort((a, b) => b.realizado - a.realizado)
+                .slice(0, 5)
+                .map(d => {
+                  const orc = d.orcamento
+                  const pct = orc > 0 ? Math.min(d.realizado / orc, 1.5) : 0
+                  const cor = corStatus(d.realizado, orc)
+                  return (
+                    <div key={d.nome} style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)' }}>
+                      <div className="flex-between mb-4">
+                        <span style={{ fontSize: '0.82rem', fontWeight: 500 }}>{d.nome}</span>
+                        <div className="flex-center" style={{ gap: 8 }}>
+                          <span className={`badge ${cor}`} style={{ fontSize: '0.65rem' }}>
+                            {cor === 'green' ? '✓' : cor === 'red' ? '✗' : '⚠'}
+                          </span>
+                          <span style={{ fontSize: '0.82rem', color: 'var(--red)' }}>{fmt(d.realizado)}</span>
+                        </div>
+                      </div>
+                      {orc > 0 && (
+                        <div className="progress-bar" style={{ height: 4 }}>
+                          <div className="progress-fill" style={{ width: `${pct * 100}%`, background: cor === 'red' ? 'var(--red)' : cor === 'yellow' ? 'var(--yellow)' : 'var(--green)' }} />
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // ---- DESKTOP VIEW ----
   return (
     <div>
       <div className="page-header">
@@ -87,7 +212,6 @@ export default function Dashboard({ mes, ano }) {
         <p>{MESES_NOME[mes - 1]} {ano} — atualizado em tempo real</p>
       </div>
 
-      {/* Cards resumo */}
       <div className="cards-grid mb-24">
         <SummaryCard color="green" label="Receita Total" value={fmt(receitaTotal)} sub={`${config.nome_pessoa1} + ${config.nome_pessoa2}`} />
         <SummaryCard color="red" label="Despesas Totais" value={fmt(totalDespesas)} sub={`Fixas: ${fmt(despesasFixas)}`} />
@@ -95,7 +219,7 @@ export default function Dashboard({ mes, ano }) {
         <SummaryCard color={saldoMes >= 0 ? 'green' : 'red'} label="Saldo do Mês" value={fmt(saldoMes)} sub={fmtPct(pctPoupado) + ' da receita'} />
       </div>
 
-      {/* Card de patrimônio investido */}
+      {/* Patrimônio investido */}
       <div className="table-wrap mb-24" style={{ borderTop: '2px solid var(--green)' }}>
         <div className="table-header">
           <h3>📈 Patrimônio Investido</h3>
@@ -104,9 +228,7 @@ export default function Dashboard({ mes, ano }) {
         <div style={{ padding: '20px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
           <div style={{ background: 'var(--surface2)', borderRadius: 'var(--radius-sm)', padding: '16px' }}>
             <div className="card-label">💰 Total investido</div>
-            <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.6rem', color: 'var(--green)', marginTop: 8 }}>
-              {fmt(patrimonioInvestido)}
-            </div>
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.6rem', color: 'var(--green)', marginTop: 8 }}>{fmt(patrimonioInvestido)}</div>
             <div className="card-sub">reserva + todos os aportes</div>
           </div>
           <div style={{ background: 'var(--surface2)', borderRadius: 'var(--radius-sm)', padding: '16px' }}>
@@ -126,13 +248,12 @@ export default function Dashboard({ mes, ano }) {
         </div>
       </div>
 
-      {/* Projeção próximo mês */}
+      {/* Projeção */}
       <div className="table-wrap mb-24" style={{ borderTop: '2px solid var(--accent)' }}>
         <div className="table-header">
           <h3>🔮 Projeção — {MESES_NOME[proximoMes - 1]} {proximoAno}</h3>
           <span className="text-sm text-muted">Com base nas faturas e despesas fixas recorrentes</span>
         </div>
-
         {loadingProximo ? (
           <div className="loading" style={{ minHeight: 80 }}><div className="spinner" /> Calculando...</div>
         ) : (
@@ -141,11 +262,7 @@ export default function Dashboard({ mes, ano }) {
               <div className="card purple">
                 <div className="card-label">💳 Faturas de Cartão</div>
                 <div className="card-value">{fmt(totalFaturasProximo)}</div>
-                <div className="card-sub">
-                  {faturasPorCartao.length > 0
-                    ? faturasPorCartao.map(c => `${c.nome}: ${fmt(c.total)}`).join(' · ')
-                    : 'Nenhuma fatura lançada ainda'}
-                </div>
+                <div className="card-sub">{faturasPorCartao.length > 0 ? faturasPorCartao.map(c => `${c.nome}: ${fmt(c.total)}`).join(' · ') : 'Nenhuma fatura ainda'}</div>
               </div>
               <div className="card red">
                 <div className="card-label">🔁 Despesas Fixas</div>
@@ -162,7 +279,6 @@ export default function Dashboard({ mes, ano }) {
                 <div className="card-sub">Receita atual − comprometido</div>
               </div>
             </div>
-
             {totalComprometido === 0 && (
               <div className="empty-state" style={{ padding: 24 }}>
                 <p>Nenhuma fatura ou despesa fixa projetada para {MESES_NOME[proximoMes - 1]} ainda.</p>
@@ -173,7 +289,6 @@ export default function Dashboard({ mes, ano }) {
       </div>
 
       <div className="grid-2 mb-24">
-        {/* Regra 50-30-20 */}
         <div className="table-wrap">
           <div className="table-header"><h3>📏 Regra 50-30-20</h3></div>
           <div style={{ padding: '20px' }}>
@@ -185,32 +300,23 @@ export default function Dashboard({ mes, ano }) {
                 <div key={r.label} style={{ marginBottom: 16 }}>
                   <div className="flex-between mb-4">
                     <span style={{ fontSize: '0.875rem', fontWeight: 500 }}>{r.label}</span>
-                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                      {fmt(r.realizado)} / {fmt(ideal)}
-                    </span>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{fmt(r.realizado)} / {fmt(ideal)}</span>
                   </div>
                   <div className="progress-bar">
                     <div className="progress-fill" style={{ width: `${pct * 100}%`, background: cor }} />
                   </div>
-                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                    Ideal: {(r.pct * 100)}% da receita
-                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 4 }}>Ideal: {(r.pct * 100)}% da receita</div>
                 </div>
               )
             })}
           </div>
         </div>
 
-        {/* Divisão do casal */}
         <div className="table-wrap">
           <div className="table-header"><h3>👫 Divisão do Casal</h3></div>
           <table>
             <thead>
-              <tr>
-                <th>Pessoa</th>
-                <th className="text-right">Despesas</th>
-                <th className="text-right">Saldo</th>
-              </tr>
+              <tr><th>Pessoa</th><th className="text-right">Despesas</th><th className="text-right">Saldo</th></tr>
             </thead>
             <tbody>
               {[config.nome_pessoa1, config.nome_pessoa2].map(nome => {
@@ -228,7 +334,6 @@ export default function Dashboard({ mes, ano }) {
         </div>
       </div>
 
-      {/* Gráfico de categorias */}
       {dadosCategoria.length > 0 && (
         <div className="table-wrap mb-24">
           <div className="table-header"><h3>📂 Gastos por Categoria</h3></div>
@@ -250,7 +355,6 @@ export default function Dashboard({ mes, ano }) {
         </div>
       )}
 
-      {/* Tabela de categorias */}
       <div className="table-wrap">
         <div className="table-header"><h3>📋 Detalhamento por Categoria</h3></div>
         <table>
@@ -276,11 +380,7 @@ export default function Dashboard({ mes, ano }) {
                   <td className="text-right text-muted">{orc > 0 ? fmt(orc) : '—'}</td>
                   <td className="text-right">{fmt(real)}</td>
                   <td className={`text-right ${diff >= 0 ? 'text-green' : 'text-red'}`}>{orc > 0 ? fmt(diff) : '—'}</td>
-                  <td>
-                    <span className={`badge ${cor}`}>
-                      {cor === 'green' ? '✓ OK' : cor === 'red' ? '✗ Excedido' : cor === 'yellow' ? '⚠ Atenção' : '—'}
-                    </span>
-                  </td>
+                  <td><span className={`badge ${cor}`}>{cor === 'green' ? '✓ OK' : cor === 'red' ? '✗ Excedido' : cor === 'yellow' ? '⚠ Atenção' : '—'}</span></td>
                 </tr>
               )
             })}
