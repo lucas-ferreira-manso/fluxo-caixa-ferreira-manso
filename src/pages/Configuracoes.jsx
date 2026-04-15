@@ -12,8 +12,8 @@ export default function Configuracoes({ mes, ano }) {
 
   if (loading) return <div className="loading"><div className="spinner" /> Carregando...</div>
 
-  const nome1 = nomes?.nome1 ?? config.nome_pessoa1 ?? 'Pessoa 1'
-  const nome2 = nomes?.nome2 ?? config.nome_pessoa2 ?? 'Esposa'
+  const nome1 = nomes?.nome1 ?? config.nome_pessoa1 ?? 'Lucas'
+  const nome2 = nomes?.nome2 ?? config.nome_pessoa2 ?? 'Lais'
   const cotacaoVal = cotacao ?? config.cotacao_usd ?? '5.14'
 
   const salvarTudo = async () => {
@@ -52,7 +52,7 @@ export default function Configuracoes({ mes, ano }) {
           <div className="table-header"><h3>👫 Nomes do Casal</h3></div>
           <div style={{ padding: 20 }}>
             <div className="form-group">
-              <label>Nome da Pessoa 1 (quem recebe em USD)</label>
+              <label>Nome da Lucas (quem recebe em USD)</label>
               <input
                 value={nome1}
                 onChange={e => setNomes(n => ({ ...(n || { nome1: nome1, nome2: nome2 }), nome1: e.target.value }))}
@@ -64,7 +64,7 @@ export default function Configuracoes({ mes, ano }) {
               <input
                 value={nome2}
                 onChange={e => setNomes(n => ({ ...(n || { nome1: nome1, nome2: nome2 }), nome2: e.target.value }))}
-                placeholder="Ex: Maria, Esposa..."
+                placeholder="Ex: Maria, Lais..."
               />
             </div>
           </div>
