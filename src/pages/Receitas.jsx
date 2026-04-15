@@ -90,7 +90,7 @@ export default function Receitas({ mes, ano }) {
       </div>
 
       <div className="grid-2">
-        {/* Pessoa 1 */}
+        {/* Lucas */}
         <div className="table-wrap">
           <div className="table-header">
             <h3>🇺🇸 {config.nome_pessoa1} — Receitas em USD</h3>
