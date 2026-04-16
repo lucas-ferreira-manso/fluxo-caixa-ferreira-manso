@@ -92,12 +92,13 @@ export default function Lancamentos({ mes, ano }) {
   const [editandoId, setEditandoId] = useState(null)
   const [filtroTipo, setFiltroTipo] = useState('Todos')
   const [filtroCateg, setFiltroCateg] = useState('Todas')
-  const [saving, setSaving] = useState(false)
+  const [filtroCateg, setFiltroCateg] = useState('Todas')
+  const [busca, setBusca] = useState('')
   const [form, setForm] = useState(FORM_VAZIO)
 
   // Estados do importador de extrato
   const [itensExtrato, setItensExtrato] = useState([])
-  const [pessoaExtrato, setPessoaExtrato] = useState('Lucas')
+  const [pessoaExtrato, setPessoaExtrato] = useState('Pessoa 1')
   const [importando, setImportando] = useState(false)
   const [verificando, setVerificando] = useState(false)
   const [resultado, setResultado] = useState(null)
@@ -106,12 +107,17 @@ export default function Lancamentos({ mes, ano }) {
 
   if (loading) return <div className="loading"><div className="spinner" /> Carregando...</div>
 
-  const p1 = config.nome_pessoa1 || 'Lucas'
-  const p2 = config.nome_pessoa2 || 'Lais'
+  const p1 = config.nome_pessoa1 || 'Pessoa 1'
+  const p2 = config.nome_pessoa2 || 'Esposa'
 
   const filtrados = lancamentos.filter(l => {
     if (filtroTipo !== 'Todos' && l.tipo !== filtroTipo) return false
     if (filtroCateg !== 'Todas' && l.categoria !== filtroCateg) return false
+    if (busca.trim()) {
+      const b = busca.toLowerCase()
+      const match = (l.descricao || '').toLowerCase().includes(b) || (l.categoria || '').toLowerCase().includes(b) || (l.pessoa || '').toLowerCase().includes(b) || (l.observacao || '').toLowerCase().includes(b)
+      if (!match) return false
+    }
     return true
   })
 
@@ -284,9 +290,19 @@ export default function Lancamentos({ mes, ano }) {
           </div>
 
           <div className="table-wrap">
-            <div className="table-header">
-              <h3>📋 Lançamentos ({filtrados.length})</h3>
-              <div className="flex-center">
+            <div className="table-header" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 10 }}>
+              <div className="flex-between">
+                <h3>📋 Lançamentos ({filtrados.length})</h3>
+                <button className="btn btn-primary btn-sm" onClick={abrirNovo}><Plus size={14} /> Novo</button>
+              </div>
+              <div className="flex-center" style={{ flexWrap: 'wrap', gap: 8 }}>
+                <input
+                  type="text"
+                  placeholder="🔍 Buscar por descrição, categoria, pessoa..."
+                  value={busca}
+                  onChange={e => setBusca(e.target.value)}
+                  style={{ flex: '1 1 200px', minWidth: 180 }}
+                />
                 <select className="mes-select" style={{ width: 'auto', padding: '6px 10px', fontSize: '0.8rem' }} value={filtroTipo} onChange={e => setFiltroTipo(e.target.value)}>
                   <option>Todos</option>
                   {TIPOS.map(t => <option key={t}>{t}</option>)}
@@ -295,7 +311,6 @@ export default function Lancamentos({ mes, ano }) {
                   <option value="Todas">Todas categorias</option>
                   {CATEGORIAS.map(c => <option key={c}>{c}</option>)}
                 </select>
-                <button className="btn btn-primary btn-sm" onClick={abrirNovo}><Plus size={14} /> Novo</button>
               </div>
             </div>
 
@@ -331,6 +346,18 @@ export default function Lancamentos({ mes, ano }) {
                     </tr>
                   ))}
                 </tbody>
+                <tfoot>
+                  <tr style={{ background: 'var(--surface2)', borderTop: '2px solid var(--border)' }}>
+                    <td colSpan={5} style={{ padding: '12px 16px', fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 500 }}>
+                      {filtrados.length} lançamento{filtrados.length !== 1 ? 's' : ''}
+                      {(filtroTipo !== 'Todos' || filtroCateg !== 'Todas' || busca) ? ' (filtrado)' : ''}
+                    </td>
+                    <td className="text-right" style={{ padding: '12px 16px', fontFamily: 'var(--font-display)', fontSize: '1.1rem', color: 'var(--red)', fontWeight: 700 }}>
+                      {fmt(filtrados.filter(l => l.tipo !== 'Receita').reduce((a, l) => a + l.valor, 0))}
+                    </td>
+                    <td></td>
+                  </tr>
+                </tfoot>
               </table>
             )}
           </div>
