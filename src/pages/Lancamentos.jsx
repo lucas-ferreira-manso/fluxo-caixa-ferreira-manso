@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react'
 import { useFinanceiro, calcularMesCompetencia } from '../hooks/useFinanceiro'
 import { fmt, CATEGORIAS, FORMAS_PAG, TIPOS, MESES_NOME } from '../lib/utils'
-import { Plus, Trash2, Edit2, CreditCard, Upload, Check, AlertCircle } from 'lucide-react'
+import { Plus, Trash2, Edit2, CreditCard, Upload, Check, AlertCircle, Search, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
 const FORM_VAZIO = {
@@ -9,7 +9,6 @@ const FORM_VAZIO = {
   valor: '', forma_pagamento: 'Débito', cartao_id: '', descricao: '', observacao: ''
 }
 
-// Mapeamento para o extrato bancário
 const MAPA_CATEGORIAS = {
   '🍽️ Alimentação': ['restauran', 'cafe', 'coffee', 'lanche', 'pizza', 'burger', 'sushi', 'ifood', 'rappi', 'delivery', 'padaria', 'armazem', 'savas', 'cultura primavera', 'quatro estacoes', 'primavera', 'fornetto'],
   '🛒 Supermercado': ['angeloni', 'mercado', 'supermercado', 'carrefour', 'atacadao', 'bistek', 'cbhomemarket', 'hortifrutti'],
@@ -49,32 +48,17 @@ function parsearExtratoNubank(texto) {
   for (let i = 1; i < linhas.length; i++) {
     const linha = linhas[i].trim()
     if (!linha) continue
-    // Formato: Data,Valor,Identificador,Descrição
     const partes = linha.split(',')
     if (partes.length < 4) continue
-    const data = partes[0].trim() // dd/mm/yyyy
+    const data = partes[0].trim()
     const valor = parseFloat(partes[1].trim())
     const identificador = partes[2].trim()
     const descricao = partes.slice(3).join(',').trim()
-
     if (!data || isNaN(valor)) continue
-
-    // Converte data de dd/mm/yyyy para yyyy-mm-dd
+    if (descricao.toLowerCase().includes('pagamento de fatura')) continue
     const [dia, mesStr, anoStr] = data.split('/')
     const dataISO = `${anoStr}-${mesStr}-${dia}`
-
-    // Ignora entradas (valores positivos) exceto se for relevante
-    // Ignora pagamento de fatura (isso já está no cartão)
-    if (descricao.toLowerCase().includes('pagamento de fatura')) continue
-
-    itens.push({
-      data: dataISO,
-      dataOriginal: data,
-      valor: Math.abs(valor),
-      isEntrada: valor > 0,
-      identificador,
-      descricao,
-    })
+    itens.push({ data: dataISO, dataOriginal: data, valor: Math.abs(valor), isEntrada: valor > 0, identificador, descricao })
   }
   return itens
 }
@@ -92,11 +76,11 @@ export default function Lancamentos({ mes, ano }) {
   const [editandoId, setEditandoId] = useState(null)
   const [filtroTipo, setFiltroTipo] = useState('Todos')
   const [filtroCateg, setFiltroCateg] = useState('Todas')
-  const [filtroCateg, setFiltroCateg] = useState('Todas')
   const [busca, setBusca] = useState('')
+  const [saving, setSaving] = useState(false)
   const [form, setForm] = useState(FORM_VAZIO)
 
-  // Estados do importador de extrato
+  // Importador de extrato
   const [itensExtrato, setItensExtrato] = useState([])
   const [pessoaExtrato, setPessoaExtrato] = useState('Pessoa 1')
   const [importando, setImportando] = useState(false)
@@ -110,32 +94,36 @@ export default function Lancamentos({ mes, ano }) {
   const p1 = config.nome_pessoa1 || 'Pessoa 1'
   const p2 = config.nome_pessoa2 || 'Esposa'
 
+  // Filtro com busca
   const filtrados = lancamentos.filter(l => {
     if (filtroTipo !== 'Todos' && l.tipo !== filtroTipo) return false
     if (filtroCateg !== 'Todas' && l.categoria !== filtroCateg) return false
     if (busca.trim()) {
       const b = busca.toLowerCase()
-      const match = (l.descricao || '').toLowerCase().includes(b) || (l.categoria || '').toLowerCase().includes(b) || (l.pessoa || '').toLowerCase().includes(b) || (l.observacao || '').toLowerCase().includes(b)
+      const match =
+        (l.descricao || '').toLowerCase().includes(b) ||
+        (l.categoria || '').toLowerCase().includes(b) ||
+        (l.pessoa || '').toLowerCase().includes(b) ||
+        (l.observacao || '').toLowerCase().includes(b)
       if (!match) return false
     }
     return true
   })
 
-  // ---- Modal de lançamento manual ----
+  // Total dos filtrados (excluindo receitas)
+  const totalFiltrado = filtrados.filter(l => l.tipo !== 'Receita').reduce((a, l) => a + l.valor, 0)
+  const temFiltroAtivo = filtroTipo !== 'Todos' || filtroCateg !== 'Todas' || busca.trim()
+
+  // ---- Modal ----
   const abrirNovo = () => { setEditandoId(null); setForm(FORM_VAZIO); setModal(true) }
 
   const abrirEditar = (l) => {
     setEditandoId(l.id)
     setForm({
-      data: l.data || '',
-      tipo: l.tipo || 'Despesa Fixa',
-      pessoa: l.pessoa || '',
-      categoria: l.categoria || CATEGORIAS[0],
-      valor: l.valor || '',
+      data: l.data || '', tipo: l.tipo || 'Despesa Fixa', pessoa: l.pessoa || '',
+      categoria: l.categoria || CATEGORIAS[0], valor: l.valor || '',
       forma_pagamento: l.cartao_id ? 'Cartão de Crédito' : (l.forma_pagamento || 'Débito'),
-      cartao_id: l.cartao_id || '',
-      descricao: l.descricao || '',
-      observacao: l.observacao || '',
+      cartao_id: l.cartao_id || '', descricao: l.descricao || '', observacao: l.observacao || '',
     })
     setModal(true)
   }
@@ -165,9 +153,8 @@ export default function Lancamentos({ mes, ano }) {
       data: form.data || null, tipo: form.tipo, pessoa: form.pessoa,
       categoria: form.categoria, valor: parseFloat(form.valor),
       forma_pagamento: form.cartao_id ? 'Cartão de Crédito' : form.forma_pagamento,
-      cartao_id: form.cartao_id || null,
-      descricao: form.descricao, observacao: form.observacao,
-      mes: mesComp, ano: anoComp,
+      cartao_id: form.cartao_id || null, descricao: form.descricao,
+      observacao: form.observacao, mes: mesComp, ano: anoComp,
     }
     if (editandoId) {
       await supabase.from('lancamentos').update(dados).eq('id', editandoId)
@@ -214,26 +201,16 @@ export default function Lancamentos({ mes, ano }) {
     const selecionados = itensExtrato.filter(i => i.selecionado)
     if (!selecionados.length) return
     setImportando(true)
-
-    // Calcula mês/ano a partir da data do lançamento
     const lancamentosParaImportar = selecionados.map(item => {
       const [anoStr, mesStr] = item.data.split('-')
       return {
-        data: item.data,
-        tipo: item.tipo,
-        pessoa: pessoaExtrato,
-        categoria: item.categoria,
-        valor: item.valor,
-        forma_pagamento: item.formaPagamento,
-        cartao_id: null,
-        descricao: item.descricao,
-        observacao: 'Importado do extrato Nubank',
-        importacao_hash: item.hash,
-        mes: parseInt(mesStr),
-        ano: parseInt(anoStr),
+        data: item.data, tipo: item.tipo, pessoa: pessoaExtrato,
+        categoria: item.categoria, valor: item.valor,
+        forma_pagamento: item.formaPagamento, cartao_id: null,
+        descricao: item.descricao, observacao: 'Importado do extrato Nubank',
+        importacao_hash: item.hash, mes: parseInt(mesStr), ano: parseInt(anoStr),
       }
     })
-
     const { error } = await supabase.from('lancamentos').insert(lancamentosParaImportar)
     await recarregar()
     setImportando(false)
@@ -277,7 +254,7 @@ export default function Lancamentos({ mes, ano }) {
         ))}
       </div>
 
-      {/* ABA LANÇAMENTOS */}
+      {/* ========== ABA LANÇAMENTOS ========== */}
       {abaAtiva === 'lancamentos' && (
         <>
           <div className="cards-grid mb-24">
@@ -290,19 +267,33 @@ export default function Lancamentos({ mes, ano }) {
           </div>
 
           <div className="table-wrap">
-            <div className="table-header" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 10 }}>
+            {/* Header com busca e filtros */}
+            <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div className="flex-between">
-                <h3>📋 Lançamentos ({filtrados.length})</h3>
+                <h3 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text)' }}>
+                  📋 Lançamentos ({filtrados.length})
+                  {temFiltroAtivo && <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}> — filtrado</span>}
+                </h3>
                 <button className="btn btn-primary btn-sm" onClick={abrirNovo}><Plus size={14} /> Novo</button>
               </div>
-              <div className="flex-center" style={{ flexWrap: 'wrap', gap: 8 }}>
-                <input
-                  type="text"
-                  placeholder="🔍 Buscar por descrição, categoria, pessoa..."
-                  value={busca}
-                  onChange={e => setBusca(e.target.value)}
-                  style={{ flex: '1 1 200px', minWidth: 180 }}
-                />
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                {/* Campo de busca */}
+                <div style={{ position: 'relative', flex: '1 1 200px', minWidth: 180 }}>
+                  <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                  <input
+                    type="text"
+                    placeholder="Buscar por descrição, categoria, pessoa..."
+                    value={busca}
+                    onChange={e => setBusca(e.target.value)}
+                    style={{ paddingLeft: 32, paddingRight: busca ? 32 : 12 }}
+                  />
+                  {busca && (
+                    <button onClick={() => setBusca('')} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 2 }}>
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+                {/* Filtros */}
                 <select className="mes-select" style={{ width: 'auto', padding: '6px 10px', fontSize: '0.8rem' }} value={filtroTipo} onChange={e => setFiltroTipo(e.target.value)}>
                   <option>Todos</option>
                   {TIPOS.map(t => <option key={t}>{t}</option>)}
@@ -311,17 +302,30 @@ export default function Lancamentos({ mes, ano }) {
                   <option value="Todas">Todas categorias</option>
                   {CATEGORIAS.map(c => <option key={c}>{c}</option>)}
                 </select>
+                {/* Limpar filtros */}
+                {temFiltroAtivo && (
+                  <button className="btn btn-ghost btn-sm" onClick={() => { setBusca(''); setFiltroTipo('Todos'); setFiltroCateg('Todas') }}>
+                    <X size={12} /> Limpar
+                  </button>
+                )}
               </div>
             </div>
 
             {filtrados.length === 0 ? (
-              <div className="empty-state"><p>Nenhum lançamento neste mês</p></div>
+              <div className="empty-state">
+                <p>{temFiltroAtivo ? 'Nenhum lançamento com estes filtros' : 'Nenhum lançamento neste mês'}</p>
+              </div>
             ) : (
               <table>
                 <thead>
                   <tr>
-                    <th>Tipo</th><th>Pessoa</th><th>Categoria</th><th>Descrição</th><th>Pagamento</th>
-                    <th className="text-right">Valor</th><th style={{ textAlign: 'center' }}>Ações</th>
+                    <th>Tipo</th>
+                    <th>Pessoa</th>
+                    <th>Categoria</th>
+                    <th>Descrição</th>
+                    <th>Pagamento</th>
+                    <th className="text-right">Valor</th>
+                    <th style={{ textAlign: 'center' }}>Ações</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -346,14 +350,26 @@ export default function Lancamentos({ mes, ano }) {
                     </tr>
                   ))}
                 </tbody>
+                {/* Rodapé com total */}
                 <tfoot>
                   <tr style={{ background: 'var(--surface2)', borderTop: '2px solid var(--border)' }}>
                     <td colSpan={5} style={{ padding: '12px 16px', fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 500 }}>
                       {filtrados.length} lançamento{filtrados.length !== 1 ? 's' : ''}
-                      {(filtroTipo !== 'Todos' || filtroCateg !== 'Todas' || busca) ? ' (filtrado)' : ''}
+                      {temFiltroAtivo && (
+                        <span style={{ marginLeft: 8, color: 'var(--accent)' }}>
+                          {filtroTipo !== 'Todos' && `• ${filtroTipo}`}
+                          {filtroCateg !== 'Todas' && ` • ${filtroCateg}`}
+                          {busca && ` • "${busca}"`}
+                        </span>
+                      )}
                     </td>
-                    <td className="text-right" style={{ padding: '12px 16px', fontFamily: 'var(--font-display)', fontSize: '1.1rem', color: 'var(--red)', fontWeight: 700 }}>
-                      {fmt(filtrados.filter(l => l.tipo !== 'Receita').reduce((a, l) => a + l.valor, 0))}
+                    <td className="text-right" style={{ padding: '12px 16px' }}>
+                      <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.1rem', color: 'var(--red)', fontWeight: 700 }}>
+                        {fmt(totalFiltrado)}
+                      </div>
+                      {temFiltroAtivo && (
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>total filtrado</div>
+                      )}
                     </td>
                     <td></td>
                   </tr>
@@ -364,9 +380,10 @@ export default function Lancamentos({ mes, ano }) {
         </>
       )}
 
-      {/* ABA IMPORTAR EXTRATO */}
+      {/* ========== ABA IMPORTAR EXTRATO ========== */}
       {abaAtiva === 'importar' && (
         <div>
+          {/* Upload */}
           {etapaImport === 'upload' && (
             <div style={{ maxWidth: 560 }}>
               <div className="table-wrap mb-24">
@@ -404,6 +421,7 @@ export default function Lancamentos({ mes, ano }) {
 
           {verificando && <div className="loading"><div className="spinner" /> Verificando duplicatas...</div>}
 
+          {/* Revisão */}
           {etapaImport === 'revisar' && !verificando && (
             <div>
               <div className="cards-grid mb-24">
@@ -412,13 +430,11 @@ export default function Lancamentos({ mes, ano }) {
                 <div className="card yellow"><div className="card-label">Já existem</div><div className="card-value">{jaExistemExtrato.length}</div></div>
                 <div className="card red"><div className="card-label">Total a importar</div><div className="card-value">{fmt(totalSelecionadoExtrato)}</div></div>
               </div>
-
               {jaExistemExtrato.length > 0 && (
                 <div style={{ background: 'var(--yellow-bg)', border: '1px solid var(--yellow)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', fontSize: '0.82rem', color: 'var(--yellow)', marginBottom: 20 }}>
                   ⚠️ <strong>{jaExistemExtrato.length} transações</strong> já existem e foram desmarcadas automaticamente.
                 </div>
               )}
-
               <div className="table-wrap mb-24">
                 <div className="table-header">
                   <h3>Revise antes de importar</h3>
@@ -464,7 +480,6 @@ export default function Lancamentos({ mes, ano }) {
                   </tbody>
                 </table>
               </div>
-
               <div className="flex-center" style={{ justifyContent: 'flex-end', gap: 12 }}>
                 <button className="btn btn-ghost" onClick={reiniciarImport}>Cancelar</button>
                 <button className="btn btn-primary" onClick={importarExtrato} disabled={importando || selecionadosExtrato.length === 0}>
@@ -474,6 +489,7 @@ export default function Lancamentos({ mes, ano }) {
             </div>
           )}
 
+          {/* Concluído */}
           {etapaImport === 'concluido' && (
             <div style={{ maxWidth: 480, margin: '0 auto', textAlign: 'center', paddingTop: 40 }}>
               {resultado?.erro ? (
@@ -501,7 +517,7 @@ export default function Lancamentos({ mes, ano }) {
         </div>
       )}
 
-      {/* Modal lançamento manual */}
+      {/* ========== MODAL LANÇAMENTO ========== */}
       {modal && (
         <div className="modal-overlay" onClick={fecharModal}>
           <div className="modal" onClick={e => e.stopPropagation()}>
