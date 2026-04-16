@@ -12,17 +12,26 @@ const FORM_VAZIO = {
 const MAPA_CATEGORIAS = {
   '🍽️ Alimentação': ['restauran', 'cafe', 'coffee', 'lanche', 'pizza', 'burger', 'sushi', 'ifood', 'rappi', 'delivery', 'padaria', 'armazem', 'savas', 'cultura primavera', 'quatro estacoes', 'primavera', 'fornetto'],
   '🛒 Supermercado': ['angeloni', 'mercado', 'supermercado', 'carrefour', 'atacadao', 'bistek', 'cbhomemarket', 'hortifrutti'],
-  '🚗 Transporte': ['posto', 'combustivel', 'gasolina', 'uber', 'taxi', '99pop', 'estacionamento', 'agua show', 'shell', 'ipiranga', 'honda'],
+  '🚗 Transporte': ['posto', 'combustivel', 'gasolina', 'uber', 'taxi', '99pop', 'estacionamento', 'agua show', 'shell', 'ipiranga', 'honda', 'banco honda'],
   '🏥 Saúde': ['farmacia', 'raia', 'drogasil', 'panvel', 'droga', 'medico', 'clinica', 'hospital', 'laboratorio', 'exame'],
-  '📚 Educação': ['escola', 'colegio', 'faculdade', 'curso', 'udemy', 'alura', 'livro', 'livraria', 'santo antonio'],
-  '🎭 Lazer': ['cinema', 'teatro', 'show', 'netflix', 'spotify', 'disney', 'hbo', 'prime', 'ingresso', 'playstation'],
+  '📚 Educação': ['escola', 'colegio', 'faculdade', 'curso', 'udemy', 'alura', 'livro', 'livraria', 'santo antonio', 'futebol leo', 'judo leo'],
+  '🎭 Lazer': ['cinema', 'teatro', 'show', 'netflix', 'spotify', 'disney', 'hbo', 'prime', 'ingresso', 'playstation', 'francisco ioneiton', 'funcional'],
   '👗 Vestuário': ['riachuelo', 'renner', 'zara', 'hm', 'havan', 'decathlon', 'chillibeans', 'milium', 'shopping', 'iguatemi'],
   '📱 Assinaturas/Tech': ['google', 'apple', 'youtube', 'icloud', 'adobe', 'microsoft', 'amazon', 'dropbox'],
-  '🏠 Moradia': ['aluguel', 'condominio', 'agua', 'luz', 'energia', 'gas', 'limpeza', 'faxina', 'moveis', 'balaroti', 'leroy', 'gralha', 'llz', 'celesc', 'supergasbras', 'one di'],
+  '🏠 Moradia': ['aluguel', 'condominio', 'agua', 'luz', 'energia', 'gas', 'limpeza', 'faxina', 'moveis', 'balaroti', 'leroy', 'gralha', 'llz', 'celesc', 'supergasbras', 'one di', 'central park', 'denise regis'],
   '✈️ Viagem': ['gol', 'latam', 'azul', 'hotel', 'airbnb', 'booking', 'aerea', 'passagem'],
   '💆 Bem-estar': ['academia', 'pilates', 'yoga', 'spa', 'salao', 'barbearia', 'estetica'],
   '🐾 Pet': ['pet', 'veterinario', 'animal', 'racao'],
 }
+
+// Contas fixas conhecidas — detectadas automaticamente como "Despesa Fixa"
+const CONTAS_FIXAS = [
+  'gralha locacao', 'one di 30', 'llz solucao', 'denise regis',
+  'celesc distribuicao', 'central park', 'supergasbras',
+  'colegio santo antonio', 'banco honda', 'funcional',
+  'futebol leo', 'judo leo', 'faculdade', 'francisco ioneiton',
+  'leonardo vasconcelos',
+]
 
 function detectarCategoria(descricao) {
   const lower = descricao.toLowerCase()
@@ -30,6 +39,13 @@ function detectarCategoria(descricao) {
     if (keywords.some(kw => lower.includes(kw))) return categoria
   }
   return '🔧 Outros'
+}
+
+function detectarTipo(descricao, isEntrada) {
+  if (isEntrada) return 'Receita'
+  const lower = descricao.toLowerCase()
+  if (CONTAS_FIXAS.some(cf => lower.includes(cf))) return 'Despesa Fixa'
+  return 'Despesa Variável'
 }
 
 function detectarFormaPagamento(descricao) {
@@ -175,7 +191,7 @@ export default function Lancamentos({ mes, ano }) {
     const resultado = itensParseados.map(item => ({
       ...item,
       categoria: item.isEntrada ? '💰 Salário/Receita' : detectarCategoria(item.descricao),
-      tipo: item.isEntrada ? 'Receita' : 'Despesa Variável',
+      tipo: detectarTipo(item.descricao, item.isEntrada),
       formaPagamento: detectarFormaPagamento(item.descricao),
       hash: `extrato_${item.identificador}`,
       selecionado: !existentes.has(`extrato_${item.identificador}`) && !item.isEntrada,
